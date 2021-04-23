@@ -17,11 +17,13 @@
 
 package org.apache.gobblin.data.management.copy.publisher;
 
+import com.google.common.collect.Iterators;
 import java.io.IOException;
 import java.net.URI;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -179,6 +181,21 @@ public class CopyDataPublisher extends DataPublisher implements UnpublishedHandl
     return datasetRoots;
   }
 
+  private void preserveAncestorsModTimes(Path destinationDir, CopyableFile copyableFile) throws IOException {
+    Iterator<Long> ancestorModTimeIt =
+        copyableFile.getAncestorsModTimes() == null ? Iterators.emptyIterator()
+            : copyableFile.getAncestorsModTimes().iterator();
+    Path path = destinationDir;
+    while (ancestorModTimeIt.hasNext() && path != null) {
+      Long modTime = ancestorModTimeIt.next();
+      if (modTime != null) {
+        fs.setTimes(path, modTime, -1L);
+        log.debug("setTimes for ancestor: {} -> {}", path, modTime);
+      }
+      path = path.getParent();
+    }
+  }
+
   /**
    * Unlike other preserving attributes of files (ownership, group, etc.), which is preserved in writer,
    * some of the attributes have to be set during publish phase like ModTime,
@@ -187,7 +204,9 @@ public class CopyDataPublisher extends DataPublisher implements UnpublishedHandl
   private void preserveFileAttrInPublisher(CopyableFile copyableFile) throws IOException {
     // Preserving File ModTime, and set the access time to an initializing value when ModTime is declared to be preserved.
     if (copyableFile.getPreserve().preserve(PreserveAttributes.Option.MOD_TIME)) {
-      fs.setTimes(copyableFile.getDestination(), copyableFile.getOriginTimestamp(), -1);
+      Path destination = copyableFile.getDestination();
+      fs.setTimes(destination, copyableFile.getOriginTimestamp(), -1);
+      preserveAncestorsModTimes(destination.getParent(), copyableFile);
     }
 
     // Preserving File Version.

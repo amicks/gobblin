@@ -94,6 +94,7 @@ public class CopyableFile extends CopyEntity implements File {
   private byte[] checksum;
   /** Attributes to be preserved. */
   private PreserveAttributes preserve;
+  private List<Long> ancestorsModTimes;
   /** Timestamp of file at its origin source. */
   private long originTimestamp;
   /** Timestamp of file as in upstream. */
@@ -106,7 +107,7 @@ public class CopyableFile extends CopyEntity implements File {
       List<OwnerAndPermission> ancestorsOwnerAndPermission, byte[] checksum, PreserveAttributes preserve,
       String fileSet, long originTimestamp, long upstreamTimestamp, Map<String, String> additionalMetadata,
       String datasetOutputPath,
-      String dataFileVersionStrategy) {
+      String dataFileVersionStrategy, List<Long> ancestorsModTimes) {
     super(fileSet, additionalMetadata);
     this.origin = origin;
     this.destination = destination;
@@ -118,6 +119,7 @@ public class CopyableFile extends CopyEntity implements File {
     this.originTimestamp = originTimestamp;
     this.upstreamTimestamp = upstreamTimestamp;
     this.datasetOutputPath = datasetOutputPath;
+    this.ancestorsModTimes = ancestorsModTimes;
   }
 
   /**
@@ -192,6 +194,7 @@ public class CopyableFile extends CopyEntity implements File {
     private FileSystem originFs;
     private Map<String, String> additionalMetadata;
     private String datasetOutputPath;
+    private List<Long> ancestorsModTimes;
 
     private Builder originFS(FileSystem originFs) {
       this.originFs = originFs;
@@ -270,7 +273,8 @@ public class CopyableFile extends CopyEntity implements File {
 
       return new CopyableFile(this.origin, this.destination, this.destinationOwnerAndPermission,
           this.ancestorsOwnerAndPermission, this.checksum, this.preserve, this.fileSet, this.originTimestamp,
-          this.upstreamTimestamp, this.additionalMetadata, this.datasetOutputPath, this.dataFileVersionStrategy);
+          this.upstreamTimestamp, this.additionalMetadata, this.datasetOutputPath, this.dataFileVersionStrategy,
+          this.ancestorsModTimes);
     }
 
     private List<OwnerAndPermission> replicateAncestorsOwnerAndPermission(FileSystem originFs, Path originPath,
@@ -382,6 +386,49 @@ public class CopyableFile extends CopyEntity implements File {
     }
     return ownerAndPermissions;
   }
+
+  public static Long resolveReplicatedModTime(FileSystem fs, Path path, CopyConfiguration copyConfiguration)
+      throws IOException {
+    PreserveAttributes preserve = copyConfiguration.getPreserve();
+    Optional<FileStatus> originFileStatus = copyConfiguration.getCopyContext().getFileStatus(fs, path);
+    if (!originFileStatus.isPresent()) {
+      throw new IOException(String.format("Origin path %s does not exist.", path));
+    }
+    return preserve.preserve(Option.MOD_TIME) ? originFileStatus.get().getModificationTime() : null;
+  }
+
+  public static List<Long> resolveReplicatedAncestorModTimesRecursively(FileSystem sourceFs, Path fromPath,
+      Path toPath, CopyConfiguration copyConfiguration) throws IOException {
+    List<Long> modTimes = Lists.newArrayList();
+
+    Path currentOriginPath = fromPath;
+    Path currentTargetPath = toPath;
+
+    if (!PathUtils.isAncestor(currentTargetPath, currentOriginPath)) {
+      throw new IOException(String.format("currentTargetPath %s must be an ancestor of currentOriginPath %s.", currentTargetPath, currentOriginPath));
+    }
+
+    while (PathUtils.isAncestor(currentTargetPath, currentOriginPath.getParent())) {
+      modTimes.add(resolveReplicatedModTime(sourceFs, currentOriginPath, copyConfiguration));
+      currentOriginPath = currentOriginPath.getParent();
+    }
+    // Now currentTargetPath and currentOriginPath are the same path.
+
+    FileSystem targetFs = copyConfiguration.getTargetFs();
+
+    // Walk through the parents and preserve the permissions from Origin -> Target as we go in lockstep.
+    // We only set modTimes for targetFs if the path does not exist yet because it implies that the copy will create it.
+    // We don't want to set modTimes for paths unrelated to the copy (paths that already exist).
+    while (currentOriginPath != null && currentTargetPath != null
+        && currentOriginPath.getName().equals(currentTargetPath.getName())
+        && !targetFs.exists(currentTargetPath)) {
+      modTimes.add(resolveReplicatedModTime(sourceFs, currentOriginPath, copyConfiguration));
+      currentOriginPath = currentOriginPath.getParent();
+      currentTargetPath = currentTargetPath.getParent();
+    }
+    return modTimes;
+  }
+
 
   @Override
   public FileStatus getFileStatus() {

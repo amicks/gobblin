@@ -58,6 +58,8 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
   public static final String DELETE_EMPTY_DIRECTORIES_KEY = CONFIG_PREFIX + ".deleteEmptyDirectories";
   /** If true, will use our new logic to preserve permissions, owner, and group of ancestors. */
   public static final String USE_NEW_PRESERVE_LOGIC_KEY = CONFIG_PREFIX + ".useNewPreserveLogic";
+  /** If true, will use our new logic to preserve permissions, owner, and group of ancestors. */
+  public static final String PRESERVE_ANCESTORS_MOD_TIMES = CONFIG_PREFIX + ".preserveAncestorsModTimes";
 
   private final Path rootPath;
   private final FileSystem fs;
@@ -76,6 +78,7 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
   private final boolean applyFilterToDirectories;
   // Use new preserve logic which recurses down and walks the parent links up for preservation of permissions, user, and group.
   private final boolean useNewPreserveLogic;
+  private final boolean preserveAncestorsModTimes;
 
   private final Properties properties;
 
@@ -96,6 +99,7 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
     this.applyFilterToDirectories =
         Boolean.parseBoolean(properties.getProperty(CopyConfiguration.APPLY_FILTER_TO_DIRECTORIES, "false"));
     this.useNewPreserveLogic = Boolean.parseBoolean(properties.getProperty(USE_NEW_PRESERVE_LOGIC_KEY));
+    this.preserveAncestorsModTimes = Boolean.parseBoolean(properties.getProperty(PRESERVE_ANCESTORS_MOD_TIMES));
     this.properties = properties;
   }
 
@@ -152,11 +156,21 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
                 replacedPrefix, configuration);
       }
 
+      List<Long> ancestorsModTimes;
+      if (this.preserveAncestorsModTimes) {
+        ancestorsModTimes = CopyableFile
+            .resolveReplicatedAncestorModTimesRecursively(this.fs, file.getPath().getParent(),
+                replacedPrefix, configuration);
+      } else {
+        ancestorsModTimes = null;
+      }
+
       CopyableFile copyableFile =
               CopyableFile.fromOriginAndDestination(this.fs, file, thisTargetPath, configuration)
                       .fileSet(datasetURN())
                       .datasetOutputPath(thisTargetPath.toString())
 		      .ancestorsOwnerAndPermission(ancestorOwnerAndPermissions)
+		      .ancestorsModTimes(ancestorsModTimes)
                       .build();
       copyableFile.setFsDatasets(this.fs, targetFs);
       copyableFiles.add(copyableFile);

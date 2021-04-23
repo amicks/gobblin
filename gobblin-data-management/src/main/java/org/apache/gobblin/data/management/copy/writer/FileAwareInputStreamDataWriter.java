@@ -435,7 +435,7 @@ public class FileAwareInputStreamDataWriter extends InstrumentedDataWriter<FileA
     Path outputFilePath = getSplitOutputFilePath(copyableFile, this.outputDir,
         copyableFile.getDatasetAndPartition(this.copyableDatasetMetadata), this.state);
 
-    log.info(String.format("Committing data from %s to %s", stagingFilePath, outputFilePath));
+    log.info(String.format("Committing data from {} to {}", stagingFilePath, outputFilePath));
     try {
       setFilePermissions(copyableFile);
 
@@ -447,7 +447,7 @@ public class FileAwareInputStreamDataWriter extends InstrumentedDataWriter<FileA
 
       this.fileContext.rename(stagingFilePath, outputFilePath, renameOptions);
     } catch (IOException ioe) {
-      log.error("Could not commit file %s.", outputFilePath);
+      log.error("Could not commit file {}.", outputFilePath);
       // persist file
       this.recoveryHelper.persistFile(this.state, copyableFile, stagingFilePath);
       throw ioe;
@@ -480,14 +480,14 @@ public class FileAwareInputStreamDataWriter extends InstrumentedDataWriter<FileA
       }
 
       if (ownerAndPermission.getFsPermission() != null) {
-        log.debug("Applying permissions %s to path %s.", ownerAndPermission.getFsPermission(), path);
+        log.debug("Applying permissions {} to path {}.", ownerAndPermission.getFsPermission(), path);
         fs.setPermission(path, addExecutePermissionToOwner(ownerAndPermission.getFsPermission()));
       }
 
       String group = ownerAndPermission.getGroup();
       String owner = ownerAndPermission.getOwner();
       if (group != null || owner != null) {
-        log.debug("Applying owner %s and group %s to path %s.", owner, group, path);
+        log.debug("Applying owner {} and group {} to path {}.", owner, group, path);
         fs.setOwner(path, owner, group);
       }
     } else {

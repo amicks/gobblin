@@ -354,6 +354,35 @@ public class CopyableFile extends CopyEntity implements File {
     return ownerAndPermissions;
   }
 
+  public static List<OwnerAndPermission> resolveReplicatedAncestorOwnerAndPermissionsRecursively(FileSystem sourceFs, Path fromPath,
+      Path toPath, CopyConfiguration copyConfiguration) throws IOException {
+
+    List<OwnerAndPermission> ownerAndPermissions = Lists.newArrayList();
+
+    // We only pass directories to this method anyways.  Those directories themselves need permissions set.
+    Path currentOriginPath = fromPath;
+    Path currentTargetPath = toPath;
+
+    if (!PathUtils.isAncestor(currentTargetPath, currentOriginPath)) {
+      throw new IOException(String.format("currentTargetPath %s must be an ancestor of currentOriginPath %s.", currentTargetPath, currentOriginPath));
+    }
+
+    while (PathUtils.isAncestor(currentTargetPath, currentOriginPath.getParent())) {
+      ownerAndPermissions.add(resolveReplicatedOwnerAndPermission(sourceFs, currentOriginPath, copyConfiguration));
+      currentOriginPath = currentOriginPath.getParent();
+    }
+    // Now currentTargetPath and currentOriginPath are the same path.
+
+    // Walk through the parents and preserve the permissions from Origin -> Target as we go in lockstep.
+    while (currentOriginPath != null && currentTargetPath != null
+        && currentOriginPath.getName().equals(currentTargetPath.getName())) {
+      ownerAndPermissions.add(resolveReplicatedOwnerAndPermission(sourceFs, currentOriginPath, copyConfiguration));
+      currentOriginPath = currentOriginPath.getParent();
+      currentTargetPath = currentTargetPath.getParent();
+    }
+    return ownerAndPermissions;
+  }
+
   @Override
   public FileStatus getFileStatus() {
     return this.origin;

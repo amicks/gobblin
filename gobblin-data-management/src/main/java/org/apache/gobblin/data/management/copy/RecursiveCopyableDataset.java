@@ -56,6 +56,8 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
   public static final String DELETE_KEY = CONFIG_PREFIX + ".delete";
   /** If true, will delete newly empty directories up to the dataset root. */
   public static final String DELETE_EMPTY_DIRECTORIES_KEY = CONFIG_PREFIX + ".deleteEmptyDirectories";
+  /** If true, will use our new logic to preserve permissions, owner, and group of ancestors. */
+  public static final String USE_NEW_PRESERVE_LOGIC_KEY = CONFIG_PREFIX + ".useNewPreserveLogic";
 
   private final Path rootPath;
   private final FileSystem fs;
@@ -72,6 +74,8 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
   private final boolean deleteEmptyDirectories;
   //Apply filter to directories
   private final boolean applyFilterToDirectories;
+  // Use new preserve logic which recurses down and walks the parent links up for preservation of permissions, user, and group.
+  private final boolean useNewPreserveLogic;
 
   private final Properties properties;
 
@@ -91,6 +95,7 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
         Boolean.parseBoolean(properties.getProperty(CopyConfiguration.INCLUDE_EMPTY_DIRECTORIES));
     this.applyFilterToDirectories =
         Boolean.parseBoolean(properties.getProperty(CopyConfiguration.APPLY_FILTER_TO_DIRECTORIES, "false"));
+    this.useNewPreserveLogic = Boolean.parseBoolean(properties.getProperty(USE_NEW_PRESERVE_LOGIC_KEY));
     this.properties = properties;
   }
 
@@ -135,13 +140,23 @@ public class RecursiveCopyableDataset implements CopyableDataset, FileSystemData
       FileStatus file = filesInSource.get(path);
       Path filePathRelativeToSearchPath = PathUtils.relativizePath(file.getPath(), replacedPrefix);
       Path thisTargetPath = new Path(replacingPrefix, filePathRelativeToSearchPath);
+
+      List<OwnerAndPermission> ancestorOwnerAndPermissions;
+      if (this.useNewPreserveLogic) {
+        ancestorOwnerAndPermissions = CopyableFile
+            .resolveReplicatedAncestorOwnerAndPermissionsRecursively(this.fs, file.getPath().getParent(),
+                replacedPrefix, configuration);
+      } else {
+        ancestorOwnerAndPermissions = CopyableFile
+            .resolveReplicatedOwnerAndPermissionsRecursively(this.fs, file.getPath().getParent(),
+                replacedPrefix, configuration);
+      }
+
       CopyableFile copyableFile =
               CopyableFile.fromOriginAndDestination(this.fs, file, thisTargetPath, configuration)
                       .fileSet(datasetURN())
                       .datasetOutputPath(thisTargetPath.toString())
-                      .ancestorsOwnerAndPermission(CopyableFile
-                              .resolveReplicatedOwnerAndPermissionsRecursively(this.fs, file.getPath().getParent(),
-                                      replacedPrefix, configuration))
+		      .ancestorsOwnerAndPermission(ancestorOwnerAndPermissions)
                       .build();
       copyableFile.setFsDatasets(this.fs, targetFs);
       copyableFiles.add(copyableFile);
